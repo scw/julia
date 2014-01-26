@@ -43,58 +43,71 @@ diag(A::AbstractVector) = error("use diagm instead of diag to construct a diagon
 
 #diagm{T}(v::AbstractVecOrMat{T})
 
-function norm{T}(x::AbstractVector{T}, p::Number)
-    if length(x) == 0
-        a = zero(T)
-    elseif p == Inf
-        a = maximum(abs(x))
-    elseif p == -Inf
-        a = minimum(abs(x))
-    else
-        absx = abs(x)
-        dx = maximum(absx)
-        if dx != zero(T)
-            scale!(absx, 1/dx)
-            a = dx * (sum(absx.^p).^(1/p))
-        else
-            a = sum(absx.^p).^(1/p)
+function norm{T}(x::AbstractVector{T}, p::Number=2)
+    n = length(x)
+    n == 0 && return zero(T)
+    p == 0 && return nnz(x)
+    @inbounds begin
+        if p == Inf || p == -Inf
+            a = abs(x[1])
+            for i = 2:n
+                a = p == Inf ? max(a, abs(x[i])) : min(a, abs(x[i]))
+            end
+            return a
+        elseif p == 1
+            a = abs(x[1])
+            for i = 2:n
+                a += abs(x[i])
+            end
+            return a
+        elseif p == 2
+            nrmInfInv = inv(norm(x,Inf))
+            isinf(nrmInfInv) && return zero(nrmInfInv)
+            a = abs2(x[1]*nrmInfInv)
+            for i = 2:n
+                a += abs2(x[i]*nrmInfInv)
+            end
+            return sqrt(a)/nrmInfInv
         end
     end
-    float(a)
+    absx = convert(Vector{typeof(sqrt(abs(x[1])))}, abs(x))
+    dx = maximum(absx)
+    dx == 0 && return zero(typeof(absx))
+    scale!(absx, 1/dx)
+    pp = convert(eltype(absx), p)
+    return dx*sum(absx.^pp)^inv(pp)
 end
-norm{T<:Integer}(x::AbstractVector{T}, p::Number) = norm(float(x), p)
-norm(x::AbstractVector) = norm(x, 2)
 
 function norm{T}(A::AbstractMatrix{T}, p::Number=2)
     m, n = size(A)
-    if m == 0 || n == 0
-        return zero(real(zero(T)))
-    elseif m == 1 || n == 1
-        return norm(reshape(A, length(A)), p)
-    elseif p == 1
-        nrm = zero(real(zero(T)))
-        for j = 1:n
-            nrmj = zero(real(zero(T)))
-            for i = 1:m
-                nrmj += abs(A[i,j])
-            end
-            nrm = max(nrm,nrmj)
-        end
-        return nrm
-    elseif p == 2
-        return svdvals(A)[1]
-    elseif p == Inf
-        nrm = zero(real(zero(T)))
-        for i = 1:m
-            nrmi = zero(real(zero(T)))
+    if m == 0 || n == 0; return zero(real(zero(T))); end
+    if m == 1 || n == 1; return norm(reshape(A, length(A)), p); end
+    @inbounds begin
+        if p == 1
+            nrm = zero(real(zero(T)))
             for j = 1:n
-                nrmi += abs(A[i,j])
+                nrmj = zero(real(zero(T)))
+                for i = 1:m
+                    nrmj += abs(A[i,j])
+                end
+                nrm = max(nrm,nrmj)
             end
-            nrm = max(nrm,nrmi)
+            return nrm
+        elseif p == 2
+            return svdvals(A)[1]
+        elseif p == Inf
+            nrm = zero(real(zero(T)))
+            for i = 1:m
+                nrmi = zero(real(zero(T)))
+                for j = 1:n
+                    nrmi += abs(A[i,j])
+                end
+                nrm = max(nrm,nrmi)
+            end
+            return nrm
+        else
+            throw(ArgumentError("invalid p-norm p=$p. Valid: 1, 2, Inf"))
         end
-        return nrm
-    else
-        throw(ArgumentError("invalid p-norm p=$p. Valid: 1, 2, Inf"))
     end
 end
 
